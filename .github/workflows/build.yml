@@ -1,0 +1,74 @@
+name: Build Ghostty-Windows Nightly
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Runs every night at midnight UTC
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Enable long paths in Git
+        run: |
+          git config --system core.longpaths true
+
+      - name: Enable long paths in Windows
+        shell: powershell
+        run: |
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+            -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+            
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: ghostty-org/ghostty
+          ref: main
+
+      - name: Install Zig toolchain
+        uses: mlugg/setup-zig@v1
+
+      - name: Build release
+        run: zig build
+
+      - name: Archive build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostty-release
+          path: zig-out/bin/ghostty.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get the current date
+        id: date
+        run: echo "CURRENT_DATE=$(date +'%Y%m%d')" >> $GITHUB_ENV
+
+      - name: Create release directory and zip
+        run: |
+          mkdir -p ghostty-release
+          mv artifacts/ghostty-release/ghostty.exe ghostty-release/
+          zip -r ghostty-windows.zip ghostty-release/*
+
+      - name: Upload release build artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ env.CURRENT_DATE }}
+          tag_name: ${{ env.CURRENT_DATE }}
+          draft: false
+          make_latest: true
+          files: |
+            ghostty-windows.zip
